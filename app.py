@@ -43,6 +43,7 @@ def map_event_name(odoo_data):
             "purchase": "Purchase",
             "sale": "Purchase",
             "won": "Purchase",
+            "lost": "Lost"
         }
         return mapping.get(raw_event, "Lead")
 
@@ -56,8 +57,9 @@ def map_event_name(odoo_data):
     stage_mapping = {
         1: "Lead",
         2: "QualifiedLead",
-        3: "Schedule",
-        4: "Purchase",
+        4: "Schedule",
+        6: "Purchase",
+        5: "Lost"
     }
 
     return stage_mapping.get(stage_id, "Lead")
