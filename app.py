@@ -12,7 +12,7 @@ app = Flask(__name__)
 PIXEL_ID = os.environ.get("META_PIXEL_ID", "")
 ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN", "")
 TEST_EVENT_CODE = os.environ.get("META_TEST_EVENT_CODE", "")
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 
 # =========================
 # FUNCIONES AUXILIARES
@@ -33,10 +33,6 @@ def only_digits(value):
 
 
 def build_meta_payload(odoo_data):
-    """
-    Convierte el JSON recibido desde Odoo
-    al formato esperado por Meta Conversions API.
-    """
     record_id = odoo_data.get("id")
     email = odoo_data.get("email_from") or odoo_data.get("email")
     phone = only_digits(odoo_data.get("phone") or odoo_data.get("mobile"))
@@ -76,9 +72,6 @@ def build_meta_payload(odoo_data):
 
 
 def send_to_meta(payload):
-    """
-    Envía el evento a Meta Conversions API.
-    """
     if not PIXEL_ID or not ACCESS_TOKEN:
         return {
             "ok": False,
@@ -134,12 +127,14 @@ def health():
 
 @app.route("/odoo/lead", methods=["POST"])
 def odoo_lead():
-    secret = request.headers.get("X-Webhook-Secret", "")
+    secret = request.args.get("secret", "")
 
     if secret != WEBHOOK_SECRET:
         return jsonify({
             "ok": False,
-            "error": "Unauthorized"
+            "error": "Unauthorized",
+            "received_secret": secret,
+            "expected_secret": WEBHOOK_SECRET
         }), 401
 
     incoming_data = request.get_json(silent=True)
@@ -160,9 +155,6 @@ def odoo_lead():
     }), 200
 
 
-# =========================
-# MAIN LOCAL
-# =========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
