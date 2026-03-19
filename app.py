@@ -32,11 +32,39 @@ def only_digits(value):
     return "".join(ch for ch in str(value) if ch.isdigit())
 
 
+def map_event_name(odoo_data):
+    """
+    Traduce el tipo de evento enviado por Odoo
+    al event_name que mandaremos a Meta.
+    """
+    raw_event = (
+        odoo_data.get("meta_event_name")
+        or odoo_data.get("event_type")
+        or odoo_data.get("stage_name")
+        or ""
+    ).strip().lower()
+
+    mapping = {
+        "lead": "Lead",
+        "qualified_lead": "QualifiedLead",
+        "qualifiedlead": "QualifiedLead",
+        "schedule": "Schedule",
+        "scheduled": "Schedule",
+        "appointment": "Schedule",
+        "purchase": "Purchase",
+        "sale": "Purchase",
+        "won": "Purchase",
+    }
+
+    return mapping.get(raw_event, "Lead")
+
+
 def build_meta_payload(odoo_data):
     record_id = odoo_data.get("id")
     email = odoo_data.get("email_from") or odoo_data.get("email")
     phone = only_digits(odoo_data.get("phone") or odoo_data.get("mobile"))
     value = odoo_data.get("expected_revenue") or odoo_data.get("amount_total") or 0
+    event_name = map_event_name(odoo_data)
 
     try:
         value = float(value)
@@ -52,10 +80,10 @@ def build_meta_payload(odoo_data):
     payload = {
         "data": [
             {
-                "event_name": "Lead",
+                "event_name": event_name,
                 "event_time": int(time.time()),
                 "action_source": "system_generated",
-                "event_id": f"odoo-lead-{record_id if record_id is not None else int(time.time())}",
+                "event_id": f"{event_name.lower()}-{record_id if record_id is not None else int(time.time())}",
                 "user_data": user_data,
                 "custom_data": {
                     "currency": "MXN",
@@ -132,9 +160,7 @@ def odoo_lead():
     if secret != WEBHOOK_SECRET:
         return jsonify({
             "ok": False,
-            "error": "Unauthorized",
-            "received_secret": secret,
-            "expected_secret": WEBHOOK_SECRET
+            "error": "Unauthorized"
         }), 401
 
     incoming_data = request.get_json(silent=True)
@@ -144,17 +170,34 @@ def odoo_lead():
             "error": "JSON inválido o vacío"
         }), 400
 
+    # 🔥 DETECTAR EVENT NAME
+    event_name = map_event_name(incoming_data)
+
     payload = build_meta_payload(incoming_data)
     meta_response = send_to_meta(payload)
 
+    # =========================
+    # 🔥 DEBUG LOGS
+    # =========================
+    print("\n====== EVENT DEBUG ======")
+    print("EVENT NAME DETECTADO:", event_name)
+    print("ODDO DATA:", incoming_data)
+    print("PAYLOAD META:", payload)
+    print("META RESPONSE:", meta_response)
+    print("========================\n")
+
     return jsonify({
         "ok": True,
+        "event_name": event_name,
         "received_from_odoo": incoming_data,
         "sent_to_meta": payload,
         "meta_response": meta_response
     }), 200
 
 
+# =========================
+# MAIN LOCAL
+# =========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
