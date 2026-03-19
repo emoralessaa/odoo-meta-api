@@ -6,17 +6,11 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# =========================
-# VARIABLES DE ENTORNO
-# =========================
 PIXEL_ID = os.environ.get("META_PIXEL_ID", "")
 ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN", "")
 TEST_EVENT_CODE = os.environ.get("META_TEST_EVENT_CODE", "")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 
-# =========================
-# FUNCIONES AUXILIARES
-# =========================
 def sha256_normalized(value):
     if value is None:
         return ""
@@ -25,18 +19,12 @@ def sha256_normalized(value):
         return ""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
-
 def only_digits(value):
     if value is None:
         return ""
     return "".join(ch for ch in str(value) if ch.isdigit())
 
-
 def map_event_name(odoo_data):
-    """
-    Traduce el tipo de evento enviado por Odoo
-    al event_name que mandaremos a Meta.
-    """
     raw_event = (
         odoo_data.get("meta_event_name")
         or odoo_data.get("event_type")
@@ -44,20 +32,35 @@ def map_event_name(odoo_data):
         or ""
     ).strip().lower()
 
-    mapping = {
-        "lead": "Lead",
-        "qualified_lead": "QualifiedLead",
-        "qualifiedlead": "QualifiedLead",
-        "schedule": "Schedule",
-        "scheduled": "Schedule",
-        "appointment": "Schedule",
-        "purchase": "Purchase",
-        "sale": "Purchase",
-        "won": "Purchase",
+    if raw_event:
+        mapping = {
+            "lead": "Lead",
+            "qualified_lead": "QualifiedLead",
+            "qualifiedlead": "QualifiedLead",
+            "schedule": "Schedule",
+            "scheduled": "Schedule",
+            "appointment": "Schedule",
+            "purchase": "Purchase",
+            "sale": "Purchase",
+            "won": "Purchase",
+        }
+        return mapping.get(raw_event, "Lead")
+
+    stage_id = odoo_data.get("stage_id")
+
+    try:
+        stage_id = int(stage_id)
+    except (TypeError, ValueError):
+        stage_id = None
+
+    stage_mapping = {
+        1: "Lead",
+        2: "QualifiedLead",
+        3: "Schedule",
+        4: "Purchase",
     }
 
-    return mapping.get(raw_event, "Lead")
-
+    return stage_mapping.get(stage_id, "Lead")
 
 def build_meta_payload(odoo_data):
     record_id = odoo_data.get("id")
@@ -98,7 +101,6 @@ def build_meta_payload(odoo_data):
 
     return payload
 
-
 def send_to_meta(payload):
     if not PIXEL_ID or not ACCESS_TOKEN:
         return {
@@ -133,25 +135,13 @@ def send_to_meta(payload):
             "body": response.text
         }
 
-
-# =========================
-# RUTAS
-# =========================
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({
-        "ok": True,
-        "message": "Render funcionando"
-    }), 200
-
+    return jsonify({"ok": True, "message": "Render funcionando"}), 200
 
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({
-        "ok": True,
-        "service": "odoo-meta-api"
-    }), 200
-
+    return jsonify({"ok": True, "service": "odoo-meta-api"}), 200
 
 @app.route("/odoo/lead", methods=["POST"])
 def odoo_lead():
@@ -170,16 +160,12 @@ def odoo_lead():
             "error": "JSON inválido o vacío"
         }), 400
 
-    # 🔥 DETECTAR EVENT NAME
     event_name = map_event_name(incoming_data)
-
     payload = build_meta_payload(incoming_data)
     meta_response = send_to_meta(payload)
 
-    # =========================
-    # 🔥 DEBUG LOGS
-    # =========================
     print("\n====== EVENT DEBUG ======")
+    print("STAGE ID:", incoming_data.get("stage_id"))
     print("EVENT NAME DETECTADO:", event_name)
     print("ODDO DATA:", incoming_data)
     print("PAYLOAD META:", payload)
@@ -194,10 +180,6 @@ def odoo_lead():
         "meta_response": meta_response
     }), 200
 
-
-# =========================
-# MAIN LOCAL
-# =========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
