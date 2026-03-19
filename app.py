@@ -12,7 +12,7 @@ app = Flask(__name__)
 PIXEL_ID = os.environ.get("META_PIXEL_ID", "")
 ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN", "")
 TEST_EVENT_CODE = os.environ.get("META_TEST_EVENT_CODE", "")
-WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
+WEBHOOK_SECRET = "UMA_metaWebhook_2026_Secure!9Xf$A2pL" #os.environ.get("WEBHOOK_SECRET", "")
 
 # =========================
 # FUNCIONES AUXILIARES
