@@ -6,11 +6,17 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-PIXEL_ID = os.environ.get("META_PIXEL_ID")
-ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN")
-TEST_EVENT_CODE = os.environ.get("META_TEST_EVENT_CODE")
-WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET")
+# =========================
+# VARIABLES DE ENTORNO
+# =========================
+PIXEL_ID = os.environ.get("META_PIXEL_ID", "")
+ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN", "")
+TEST_EVENT_CODE = os.environ.get("META_TEST_EVENT_CODE", "")
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
 
+# =========================
+# FUNCIONES AUXILIARES
+# =========================
 def sha256_normalized(value):
     if value is None:
         return ""
@@ -19,20 +25,26 @@ def sha256_normalized(value):
         return ""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
+
 def only_digits(value):
     if value is None:
         return ""
     return "".join(ch for ch in str(value) if ch.isdigit())
 
+
 def build_meta_payload(odoo_data):
+    """
+    Convierte el JSON recibido desde Odoo
+    al formato esperado por Meta Conversions API.
+    """
     record_id = odoo_data.get("id")
-    email = odoo_data.get("email_from")
-    phone = only_digits(odoo_data.get("phone"))
-    value = odoo_data.get("expected_revenue") or 0
+    email = odoo_data.get("email_from") or odoo_data.get("email")
+    phone = only_digits(odoo_data.get("phone") or odoo_data.get("mobile"))
+    value = odoo_data.get("expected_revenue") or odoo_data.get("amount_total") or 0
 
     try:
         value = float(value)
-    except:
+    except (TypeError, ValueError):
         value = 0
 
     user_data = {}
@@ -47,7 +59,7 @@ def build_meta_payload(odoo_data):
                 "event_name": "Lead",
                 "event_time": int(time.time()),
                 "action_source": "system_generated",
-                "event_id": f"lead-{record_id}",
+                "event_id": f"odoo-lead-{record_id if record_id is not None else int(time.time())}",
                 "user_data": user_data,
                 "custom_data": {
                     "currency": "MXN",
@@ -62,33 +74,95 @@ def build_meta_payload(odoo_data):
 
     return payload
 
-def send_to_meta(payload):
-    url = f"https://graph.facebook.com/v18.0/{PIXEL_ID}/events"
-    response = requests.post(
-        url,
-        params={"access_token": ACCESS_TOKEN},
-        json=payload
-    )
-    return response.json()
 
-@app.route("/")
+def send_to_meta(payload):
+    """
+    Envía el evento a Meta Conversions API.
+    """
+    if not PIXEL_ID or not ACCESS_TOKEN:
+        return {
+            "ok": False,
+            "error": "Faltan META_PIXEL_ID o META_ACCESS_TOKEN en variables de entorno"
+        }
+
+    url = f"https://graph.facebook.com/v25.0/{PIXEL_ID}/events"
+
+    try:
+        response = requests.post(
+            url,
+            params={"access_token": ACCESS_TOKEN},
+            json=payload,
+            timeout=30
+        )
+
+        return {
+            "ok": response.ok,
+            "status_code": response.status_code,
+            "body": response.json() if response.content else {}
+        }
+    except requests.RequestException as e:
+        return {
+            "ok": False,
+            "error": str(e)
+        }
+    except ValueError:
+        return {
+            "ok": False,
+            "status_code": response.status_code,
+            "body": response.text
+        }
+
+
+# =========================
+# RUTAS
+# =========================
+@app.route("/", methods=["GET"])
 def home():
-    return {"status": "ok"}
+    return jsonify({
+        "ok": True,
+        "message": "Render funcionando"
+    }), 200
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({
+        "ok": True,
+        "service": "odoo-meta-api"
+    }), 200
+
 
 @app.route("/odoo/lead", methods=["POST"])
 def odoo_lead():
-    secret = request.headers.get("X-Webhook-Secret")
+    secret = request.headers.get("X-Webhook-Secret", "")
 
     if secret != WEBHOOK_SECRET:
-        return {"error": "unauthorized"}, 401
+        return jsonify({
+            "ok": False,
+            "error": "Unauthorized"
+        }), 401
 
-    data = request.json
+    incoming_data = request.get_json(silent=True)
+    if not incoming_data:
+        return jsonify({
+            "ok": False,
+            "error": "JSON inválido o vacío"
+        }), 400
 
-    payload = build_meta_payload(data)
+    payload = build_meta_payload(incoming_data)
     meta_response = send_to_meta(payload)
 
-    return {
-        "received": data,
-        "sent": payload,
-        "meta": meta_response
-    }
+    return jsonify({
+        "ok": True,
+        "received_from_odoo": incoming_data,
+        "sent_to_meta": payload,
+        "meta_response": meta_response
+    }), 200
+
+
+# =========================
+# MAIN LOCAL
+# =========================
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
